@@ -1,0 +1,104 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.graph_objects as go
+
+# --- 頁面設定 ---
+st.set_page_config(page_title="台股 AI 戰情室 2.0", layout="wide", page_icon="🏢")
+
+# --- 數據抓取函數 (優化版) ---
+@st.cache_data(ttl=3600)
+def get_war_room_data(sid):
+    sid = sid.strip().upper()
+    for suffix in [".TW", ".TWO"]:
+        target_id = f"{sid}{suffix}"
+        try:
+            ticker = yf.Ticker(target_id)
+            df = ticker.history(period="1y")
+            if not df.empty:
+                try:
+                    s_name = ticker.info.get('shortName') or ticker.info.get('longName') or sid
+                except:
+                    s_name = sid
+                return df, target_id, s_name
+        except:
+            continue
+    return pd.DataFrame(), None, None
+
+# --- 側邊欄：使用者分組 ---
+st.sidebar.header("👤 監控清單分組")
+group_choice = st.sidebar.selectbox("切換群組", ["核心持股", "觀察清單", "自定義"])
+
+# 不同群組的初始設定
+default_map = {
+    "核心持股": "2330, 5498, 6182",
+    "觀察清單": "2454, 2317, 2603, 2609",
+    "自定義": ""
+}
+
+watchlist_input = st.sidebar.text_area("編輯本組代號 (逗號隔開)", value=default_map[group_choice])
+stocks = [s.strip() for s in watchlist_input.split(",") if s.strip()]
+
+# --- 主介面 ---
+st.title(f"🏢 台股戰情室 - {group_choice}")
+
+if not stocks:
+    st.info("👈 請在左側輸入股票代號開始監控")
+else:
+    # 1. 儀表板總覽
+    summary_data = []
+    with st.spinner('掃描市場趨勢中...'):
+        for s in stocks:
+            df, tid, name = get_war_room_data(s)
+            if not df.empty:
+                cp = df['Close'].iloc[-1]
+                m5 = df['Close'].rolling(5).mean().iloc[-1]
+                m13 = df['Close'].rolling(13).mean().iloc[-1]
+                m37 = df['Close'].rolling(37).mean().iloc[-1]
+                vol = df['Volume'].iloc[-1]
+                bias = ((cp - m5) / m5) * 100
+                
+                # AI 燈號判斷
+                if cp > m5 > m13 > m37:
+                    status = "🟢 多頭強勢"
+                elif cp < m37:
+                    status = "🔴 趨勢轉空"
+                elif cp < m5:
+                    status = "🟡 短期修正"
+                else:
+                    status = "⚪ 震盪整理"
+                
+                summary_data.append({
+                    "名稱": name, "代號": s, "目前股價": f"{cp:.2f}",
+                    "5MA乖離": f"{bias:.2f}%", "成交量(股)": f"{vol:,.0f}", "AI 燈號": status
+                })
+
+    # 顯示監控表格
+    st.subheader("📊 全球清單即時狀態")
+    st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # 2. 快速切換診斷
+    st.subheader("🔍 快速個股診斷")
+    target = st.selectbox("點擊切換查看詳細 K 線圖", stocks)
+    
+    if target:
+        df, tid, name = get_war_room_data(target)
+        if not df.empty:
+            df['5MA'] = df['Close'].rolling(5).mean()
+            df['13MA'] = df['Close'].rolling(13).mean()
+            df['37MA'] = df['Close'].rolling(37).mean()
+            
+            fig = go.Figure()
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線'))
+            fig.add_trace(go.Scatter(x=df.index, y=df['5MA'], line=dict(color='#00BFFF'), name='5MA'))
+            fig.add_trace(go.Scatter(x=df.index, y=df['37MA'], line=dict(color='#BA55D3'), name='37MA'))
+            fig.update_layout(height=450, template="plotly_dark", xaxis_rangeslider_visible=False)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # 簡潔 AI 建議
+            if df['Close'].iloc[-1] > df['37MA'].iloc[-1]:
+                st.success(f"📈 {name} 中期趨勢向上，建議持股續抱。")
+            else:
+                st.error(f"📉 {name} 處於中期空頭，建議減碼觀望。")
