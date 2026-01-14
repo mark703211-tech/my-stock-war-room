@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 # --- 頁面設定 ---
 st.set_page_config(page_title="台股 AI 戰情室 2.0", layout="wide", page_icon="🏢")
 
-# --- 數據抓取函數 (優化版) ---
+# --- 數據抓取函數 (防封鎖穩定版) ---
 @st.cache_data(ttl=3600)
 def get_war_room_data(sid):
     sid = sid.strip().upper()
@@ -16,37 +16,34 @@ def get_war_room_data(sid):
             ticker = yf.Ticker(target_id)
             df = ticker.history(period="1y")
             if not df.empty:
-                try:
-                    s_name = ticker.info.get('shortName') or ticker.info.get('longName') or sid
-                except:
-                    s_name = sid
-                return df, target_id, s_name
+                # 這裡只抓代號，避免抓 info 導致 RateLimit 錯誤
+                return df, target_id, sid 
         except:
             continue
     return pd.DataFrame(), None, None
 
-# --- 側邊欄：使用者分組 ---
-st.sidebar.header("👤 監控清單分組")
-group_choice = st.sidebar.selectbox("切換群組", ["核心持股", "觀察清單", "自定義"])
+# --- 側邊欄：分組設定 ---
+st.sidebar.header("👤 監控分組切換")
+group_name = st.sidebar.selectbox("切換清單", ["我的核心持股", "觀察清單", "自定義清單"])
 
-# 不同群組的初始設定
+# 預設名單
 default_map = {
-    "核心持股": "2330, 5498, 6182",
-    "觀察清單": "2454, 2317, 2603, 2609",
-    "自定義": ""
+    "我的核心持股": "2330, 5498, 6182",
+    "觀察清單": "2454, 2317, 2603",
+    "自定義清單": ""
 }
 
-watchlist_input = st.sidebar.text_area("編輯本組代號 (逗號隔開)", value=default_map[group_choice])
-stocks = [s.strip() for s in watchlist_input.split(",") if s.strip()]
+watchlist = st.sidebar.text_area("編輯本組代號 (逗號隔開)", value=default_map[group_name])
+stocks = [s.strip() for s in watchlist.split(",") if s.strip()]
 
-# --- 主介面 ---
-st.title(f"🏢 台股戰情室 - {group_choice}")
+# --- 主畫面 ---
+st.title(f"🏢 台股戰情室 - {group_name}")
 
 if not stocks:
-    st.info("👈 請在左側輸入股票代號開始監控")
+    st.info("👈 請在左側輸入股票代號，例如：2330, 5498")
 else:
-    # 1. 儀表板總覽
-    summary_data = []
+    # 1. 戰情匯總表格
+    summary = []
     with st.spinner('掃描市場趨勢中...'):
         for s in stocks:
             df, tid, name = get_war_room_data(s)
@@ -56,32 +53,33 @@ else:
                 m13 = df['Close'].rolling(13).mean().iloc[-1]
                 m37 = df['Close'].rolling(37).mean().iloc[-1]
                 vol = df['Volume'].iloc[-1]
-                bias = ((cp - m5) / m5) * 100
                 
-                # AI 燈號判斷
+                # AI 燈號邏輯 (5/13/37 MA 結構)
                 if cp > m5 > m13 > m37:
                     status = "🟢 多頭強勢"
                 elif cp < m37:
-                    status = "🔴 趨勢轉空"
-                elif cp < m5:
-                    status = "🟡 短期修正"
+                    status = "🔴 中期破線"
+                elif m5 < m13:
+                    status = "🟡 短期轉弱"
                 else:
-                    status = "⚪ 震盪整理"
+                    status = "⚪ 區間整理"
                 
-                summary_data.append({
-                    "名稱": name, "代號": s, "目前股價": f"{cp:.2f}",
-                    "5MA乖離": f"{bias:.2f}%", "成交量(股)": f"{vol:,.0f}", "AI 燈號": status
+                summary.append({
+                    "股票名稱": name, 
+                    "最後成交價": f"{cp:.2f}", 
+                    "今日成交量(股)": f"{vol:,.0f}", 
+                    "目前趨勢": status
                 })
 
-    # 顯示監控表格
-    st.subheader("📊 全球清單即時狀態")
-    st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
+    st.subheader("📊 清單即時狀態掃描")
+    # 顯示漂亮的表格，不顯示索引
+    st.table(pd.DataFrame(summary))
 
     st.divider()
 
-    # 2. 快速切換診斷
-    st.subheader("🔍 快速個股診斷")
-    target = st.selectbox("點擊切換查看詳細 K 線圖", stocks)
+    # 2. 個股切換深度分析
+    st.subheader("🔍 快速切換 K 線診斷")
+    target = st.selectbox("選取要查看細節的股票", stocks)
     
     if target:
         df, tid, name = get_war_room_data(target)
@@ -90,15 +88,27 @@ else:
             df['13MA'] = df['Close'].rolling(13).mean()
             df['37MA'] = df['Close'].rolling(37).mean()
             
-            fig = go.Figure()
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線'))
-            fig.add_trace(go.Scatter(x=df.index, y=df['5MA'], line=dict(color='#00BFFF'), name='5MA'))
-            fig.add_trace(go.Scatter(x=df.index, y=df['37MA'], line=dict(color='#BA55D3'), name='37MA'))
-            fig.update_layout(height=450, template="plotly_dark", xaxis_rangeslider_visible=False)
+            # 畫圖
+            fig = go.Figure(data=[go.Candlestick(
+                x=df.index, open=df['Open'], high=df['High'], 
+                low=df['Low'], close=df['Close'], name='K線'
+            )])
+            fig.add_trace(go.Scatter(x=df.index, y=df['5MA'], name='5MA', line=dict(color='#00BFFF', width=1.5)))
+            fig.add_trace(go.Scatter(x=df.index, y=df['13MA'], name='13MA', line=dict(color='#FF8C00', width=1.5)))
+            fig.add_trace(go.Scatter(x=df.index, y=df['37MA'], name='37MA', line=dict(color='#BA55D3', width=2)))
+            
+            fig.update_layout(
+                height=450, 
+                template="plotly_dark", 
+                xaxis_rangeslider_visible=False,
+                margin=dict(l=10, r=10, t=30, b=10)
+            )
             st.plotly_chart(fig, use_container_width=True)
             
-            # 簡潔 AI 建議
-            if df['Close'].iloc[-1] > df['37MA'].iloc[-1]:
-                st.success(f"📈 {name} 中期趨勢向上，建議持股續抱。")
+            # 簡易文字提醒
+            current_close = df['Close'].iloc[-1]
+            ma37_val = df['37MA'].iloc[-1]
+            if current_close > ma37_val:
+                st.success(f"📈 {name} 股價在 37MA ({ma37_val:.2f}) 之上，中期趨勢安全。")
             else:
-                st.error(f"📉 {name} 處於中期空頭，建議減碼觀望。")
+                st.error(f"📉 {name} 股價在 37MA ({ma37_val:.2f}) 之下，中期趨勢偏空。")
