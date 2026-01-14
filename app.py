@@ -10,8 +10,8 @@ st.set_page_config(page_title="台股 AI 戰情室 2.0", layout="wide")
 # 這裡可以為不同使用者定義專屬的初始名單
 user_data = {
     "訪客": "2330, 2317",
-    "使用者 A (核心)": "2330, 5498, 6182",
-    "使用者 B (波段)": "2454, 2603, 2609",
+    "邱小豬": "2330, 5498, 6182",
+    "宗珉": "2454, 2603, 2609",
     "使用者 C (存股)": "0050, 0056, 00878"
 }
 
@@ -87,3 +87,4 @@ else:
             fig.add_trace(go.Scatter(x=df.index, y=df['37MA'], name='37MA', line=dict(color='#BA55D3')))
             fig.update_layout(height=450, template="plotly_dark", xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
+
