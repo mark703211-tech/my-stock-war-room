@@ -4,16 +4,17 @@ import pandas as pd
 import plotly.graph_objects as go
 
 # --- 1. 頁面配置 ---
-st.set_page_config(page_title="台股 AI 戰情室 2.0", layout="wide", page_icon="🏢")
+st.set_page_config(page_title="台股 AI 戰情室 2.1", layout="wide", page_icon="🏢")
 
-# 手機觸控 CSS 補丁 (優化縮放且不影響內容)
+# 手機觸控與樣式補丁
 st.markdown("""
     <style>
     .js-plotly-plot .plotly .main-svg { touch-action: pan-y pinch-zoom !important; }
+    .stMetric { background-color: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 使用者數據庫 ---
+# --- 2. 使用者數據庫 (已依照您的需求更新 丘小豬 的預設名單) ---
 user_profiles = {
     "丘小豬": "2344, 2408, 2409, 2454, 3481, 5498, 8422",
     "宗珉": "2454, 2317, 2603",
@@ -24,6 +25,7 @@ user_profiles = {
 @st.cache_data(ttl=3600)
 def get_war_room_data(sid):
     sid = sid.strip().upper()
+    # 輪詢上市 (.TW) 與 上櫃 (.TWO) 後綴
     for suffix in [".TW", ".TWO"]:
         target_id = f"{sid}{suffix}"
         try:
@@ -67,6 +69,7 @@ else:
                 m37 = df['Close'].rolling(37).mean().iloc[-1]
                 vol = df['Volume'].iloc[-1]
                 
+                # 燈號判定邏輯 (依照您的原始版本)
                 if cp > m5 > m13 > m37: status = "🟢 多頭排列"
                 elif cp < m37: status = "🔴 趨勢偏空"
                 elif m5 < m13: status = "🟡 短線轉弱"
@@ -74,7 +77,8 @@ else:
                 
                 summary.append({"名稱": name, "股價": f"{cp:.2f}", "成交量": f"{vol:,.0f}", "狀態": status})
     
-    st.table(pd.DataFrame(summary))
+    if summary:
+        st.table(pd.DataFrame(summary))
     st.divider()
 
     # B. 深度個股診斷區
@@ -93,13 +97,13 @@ else:
             m13 = round(df['13MA'].iloc[-1], 2)
             m37 = round(df['37MA'].iloc[-1], 2)
 
-            # 繪製 K 線圖 (導入手機操控優化)
+            # 繪製 K 線圖 (手機優化操控)
             fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='K線')])
             fig.add_trace(go.Scatter(x=df.index, y=df['5MA'], name='5MA', line=dict(color='#00BFFF', width=1.5)))
             fig.add_trace(go.Scatter(x=df.index, y=df['13MA'], name='13MA', line=dict(color='#FF8C00', width=1.5)))
             fig.add_trace(go.Scatter(x=df.index, y=df['37MA'], name='37MA', line=dict(color='#BA55D3', width=2)))
             
-            # 解決手機模糊：預設顯示最近 60 根 K 線
+            # 手機顯示視角優化 (解決糊成一團)
             last_60 = [df.index[-60] if len(df)>60 else df.index[0], df.index[-1]]
             fig.update_layout(
                 height=500, template="plotly_dark", xaxis_rangeslider_visible=False,
@@ -109,7 +113,7 @@ else:
             )
             st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': False})
 
-            # --- 原始 AI 詳細建議內容 (完全保留，無修改) ---
+            # --- 原始 AI 詳細建議內容 (完全保留) ---
             st.write(f"#### 🤖 {name} ({focus_target}) 實戰策略指引")
             
             col_a, col_b, col_c = st.columns(3)
